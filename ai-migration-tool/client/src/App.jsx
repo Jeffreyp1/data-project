@@ -17,17 +17,29 @@ export default function App() {
   const [uploadedPath, setUploadedPath] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [auditReport, setAuditReport] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const hasPreview = useMemo(() => previewRows.length > 0, [previewRows]);
 
   async function handleUpload(file) {
-    // TODO:
-    // - POST multipart/form-data to Flask `/api/upload`
-    // - setUploadedPath(response.uploaded_path or file_id)
-    // - optionally parse a client-side preview (or ask backend for preview rows)
-    void file;
-    setUploadedPath("TODO: uploaded_path");
-    setPreviewRows([]);
+    setIsLoading(true);
+    setError(null);
+    try{
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("http://localhost:5001/api/upload",{
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json();
+      setUploadedPath(data.uploaded_path);
+      setPreviewRows([]);
+    }catch(err){
+      setError(err.message);
+    }finally{
+      setIsLoading(false);
+    }
   }
 
   async function handleAnalyze() {
@@ -36,6 +48,10 @@ export default function App() {
     // - Receive excel_output_path + audit_report
     // - Update auditReport + store excel download token/link
     if (!uploadedPath) return;
+    const response = await fetch("http://localhost:5001/api/analyze",{
+      method: "POST",
+      body: JSON.stringify({ uploaded_path: uploadedPath }),
+    })
     setAuditReport("TODO: audit report from backend");
   }
 
@@ -48,7 +64,8 @@ export default function App() {
             Upload legacy CSV → clean/transform → AI mapping + readiness → export Excel + audit report.
           </p>
         </header>
-
+        {isLoading && <p className="text-sm text-slate-500">Uploading...</p>}
+        {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="grid gap-6">
           <section className="rounded-lg border border-slate-200 bg-white p-5">
             <FileUpload onUpload={handleUpload} onAnalyze={handleAnalyze} />
