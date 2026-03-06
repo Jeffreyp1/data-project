@@ -1,0 +1,23 @@
+.env
+# Environment variables — never commit API keys
+.env
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Uploaded files — these are temporary
+uploads/*.csv
+
+# Generated output files — these are temporary
+outputs/*.xlsx
+
+# Mac system files
+.DS_Store
+
+# Node modules — too large to commit
+node_modules/
+
+# Vite build output
+dist/
