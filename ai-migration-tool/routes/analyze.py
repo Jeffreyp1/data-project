@@ -34,9 +34,14 @@ def analyze():
 
     # 1) Load
     raw_df = load_legacy_csv(uploaded_path)
+    if raw_df.empty or len(raw_df.columns) == 0:
+        return jsonify({"error": "File not found or file could not be read"}), 404
 
     # 2) Clean / transform
-    clean_df = clean_legacy_dataframe(raw_df)
+    try:
+        clean_df = clean_legacy_dataframe(raw_df)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # 3) AI analysis (field mapping + readiness)
     audit_report = run_migration_readiness_analysis(clean_df)

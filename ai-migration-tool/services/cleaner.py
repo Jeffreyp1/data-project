@@ -62,13 +62,28 @@ def clean_legacy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "country": "Country",
         "country_name": "Country",
         "country_name": "Country",
-        "anual_revnue": "Annual Revenue",
+        "anual_revnue": "Annual Revenue"
     }
     ## drops row duplicates (keeps one)
     df = df.drop_duplicates() 
+    print("Raw columns:", df.columns.tolist())
+
     #rename the columns to the new names under customer_map
+    df.columns = [str(col).strip() for col in df.columns]
+
     df = df.rename(columns=customer_map)
-    df['Annual Revenue'] = df['Annual Revenue'].astype(str).str.replace('[$,]', '', regex=True)
+    print("Columns after rename:", df.columns.tolist())  # ← add this
+
+    required = ["Customer_ID", "Customer Name", "Phone", "Email", "Country", "Annual Revenue"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"CSV is missing required columns (after mapping): {missing}. "
+            f"Expected one of: cust_id/customerid, full name/fullname, phone, email, country/cntry, anual_revnue."
+        )
+
+    df['Annual Revenue'] = df['Annual Revenue'].astype(str)
+    df['Annual Revenue'] = df['Annual Revenue'].str.replace('[$,]', '', regex=True)
     ## converts to annual revenue data typevalue into a number
     df['Annual Revenue'] = pd.to_numeric(df['Annual Revenue'], errors='coerce')
 
@@ -86,10 +101,9 @@ def clean_legacy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         return 'READY'
     ## validates data and adds it as a note
     def normalize_phone(row):
-        phone_number = str(row['Phone'])
-        if pd.notna(phone_number):
-            phone_number_digits_only = re.sub(r'\D', '', phone_number)
-        return phone_number_digits_only
+        if pd.isna(str(row['Phone'])):
+            return ''
+        return re.sub(r'\D', '', str(row['Phone']))
     def get_status_and_notes(row):
         issues = []
         phone_number = str(row['Phone']) # convert to string or it will cause re to crash
@@ -157,10 +171,11 @@ def write_clean_excel(
     resolved_filename = filename or f"cleaned_{uuid.uuid4().hex}.xlsx"
     out_path = os.path.join(resolved_output_dir, resolved_filename)
 
-    # TODO: actually write excel via pandas/openpyxl
+    df.to_excel(out_path, index = False)
     return out_path
 
 if __name__ == "__main__":
     df = load_legacy_csv("uploads/data_sample.csv")
+    print("Raw columns:", df.columns.tolist())
     cleaned = clean_legacy_dataframe(df)
     print(cleaned)
