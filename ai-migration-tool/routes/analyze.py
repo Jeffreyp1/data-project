@@ -32,18 +32,18 @@ def analyze():
     if not uploaded_path:
         return jsonify({"error": "Missing uploaded_path"}), 400
 
-    # 1) Load
+    ## load the data
     raw_df = load_legacy_csv(uploaded_path)
     if raw_df.empty or len(raw_df.columns) == 0:
         return jsonify({"error": "File not found or file could not be read"}), 404
 
-    # 2) Clean / transform
+    ## transform data 
     try:
         clean_df = clean_legacy_dataframe(raw_df)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # 3) AI analysis (field mapping + readiness)
+    # 3) AI analysis (WIP)
     audit_report = run_migration_readiness_analysis(clean_df)
 
     # 4) Write clean Excel output
@@ -54,5 +54,6 @@ def analyze():
             "message": "Analysis complete (stubbed)",
             "excel_output_path": excel_output_path,
             "audit_report": audit_report,
+            "cleaned_rows": clean_df.to_dict(orient="records")
         }
     ), 200

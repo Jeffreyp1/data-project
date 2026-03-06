@@ -12,7 +12,7 @@ export default function DataTable({ rows }) {
   if (!rows || rows.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-600">
-        No preview available yet.
+        {rows}
       </div>
     );
   }

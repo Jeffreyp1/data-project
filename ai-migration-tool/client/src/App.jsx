@@ -34,7 +34,7 @@ export default function App() {
       })
       const data = await response.json();
       setUploadedPath(data.uploaded_path);
-      setPreviewRows([]);
+      await handleAnalyze(data.uploaded_path)
     }catch(err){
       setError(err.message);
     }finally{
@@ -42,17 +42,22 @@ export default function App() {
     }
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(path) {
     // TODO:
     // - POST JSON to Flask `/api/analyze` with uploadedPath/file_id
     // - Receive excel_output_path + audit_report
     // - Update auditReport + store excel download token/link
-    if (!uploadedPath) return;
+    const activePath = path || uploadedPath;
+    if (!activePath) return;
+    console.log("UploadedPath:", uploadedPath)
     const response = await fetch("http://localhost:5001/api/analyze",{
       method: "POST",
-      body: JSON.stringify({ uploaded_path: uploadedPath }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uploaded_path: activePath }),
     })
-    setAuditReport("TODO: audit report from backend");
+    const data = await response.json()
+    setAuditReport(data.auditReport);
+    setPreviewRows(data.cleaned_rows || [])
   }
 
   return (
