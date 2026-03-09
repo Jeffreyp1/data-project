@@ -53,7 +53,7 @@ def build_mapping_prompt(df: pd.DataFrame) -> str:
     # TODO: craft a strong, deterministic prompt
     columns = df.columns.tolist()
     sample_rows = df.head(5).to_dict()
-    toolkit_dict = list(get_cleaning_toolkit().keys())
+    toolkit_keys = list(get_cleaning_toolkit().keys())
     prompt = f"""
         You are an SAP S/4HANA data migration assistant.
 
@@ -159,11 +159,16 @@ def run_migration_readiness_analysis(df: pd.DataFrame) -> Dict[str, Any]:
     _prompt = build_mapping_prompt(df)
 
     # TODO: call Claude via anthropic SDK and parse response
-    resp = _client.messages.create(
-        model="claude-opus-4-6", max_tokens=1024, messages=[{"role": "user", "content": _prompt}]
-    )
-    #transform the response into text
-    resp_text = resp.content[0].text
-    result_text = resp_text.replace("```json", "").replace("```", "").strip()
-    return json.loads(result_text)
+    try:
+        resp = _client.messages.create(
+            model="claude-opus-4-6", max_tokens=1024, messages=[{"role": "user", "content": _prompt}]
+        )
+        #transform the response into text
+        resp_text = resp.content[0].text
+        result_text = resp_text.replace("```json", "").replace("```", "").strip()
+        return json.loads(result_text)
+    except Exception as e:
+        print("Error sending the prompt: ", e)
+        return {}
+
 

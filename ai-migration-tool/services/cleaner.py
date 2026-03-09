@@ -257,7 +257,18 @@ def standardize_country(series):
         return 'UNKNOWN'
     return series.apply(convert)
 
-
+def normalize_name(series):
+    import math
+    def convert(value):
+        if value is None:
+            return 'MISSING VALUE'
+        if isinstance(value, float) and math.isnan(value):
+            return 'MISSING VALUE'
+        value = str(value).strip()
+        if value == '' or value.lower() == 'nan':
+            return 'MISSING VALUE'
+        return value.title()
+    return series.apply(convert)
 def get_cleaning_toolkit():
     return {
         'strip_currency':      strip_currency,
@@ -267,12 +278,14 @@ def get_cleaning_toolkit():
         'normalize_id':        normalize_id,
         'flag_missing':        flag_missing,
         'standardize_country': standardize_country,
+        'normalize_name':      normalize_name,
     }
 
 def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFrame:
     toolkit = get_cleaning_toolkit()
     res = pd.DataFrame()
-    ##extracts response from claude 
+    ##extracts response from claude
+    result = pd.DataFrame()
     for mapping in mapping_instructions["field_mappings"]:
         source = mapping['source']
         target = mapping['target']
@@ -286,7 +299,7 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFra
             result[f'REVIEW___{target}'] = df[source]
             continue
 
-        func = toolkit.get(cleaning_fn, toolkit[`strip_whitespace`])
+        func = toolkit.get(cleaning_fn, toolkit['strip_whitespace'])
         result[target] = func(df[source])
     
     for col in mapping_instructions.get('unmapped_column', []):
@@ -299,9 +312,9 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFra
     required = {'KUNNR', 'NAME1'}
     mapped_targets = set()
     for m in mapping_instructions['field_mappings']:
-        mapped_targets.add(m['targets'])
+        mapped_targets.add(m['target'])
     low_confidence = False
-    for m in mapping_instructions['confidence']:
+    for m in mapping_instructions['field_mappings']:
         if m['confidence'] < 0.80:
             low_confidence = True
             break
