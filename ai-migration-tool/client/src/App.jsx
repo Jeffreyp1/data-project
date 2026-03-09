@@ -16,8 +16,9 @@ export default function App() {
    */
   const [uploadedPath, setUploadedPath] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
-  const [auditReport, setAuditReport] = useState("");
+  const [auditReport, setAuditReport] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [excelPath, setExcelPath] = useState(null)
   const [error, setError] = useState(null);
 
   const hasPreview = useMemo(() => previewRows.length > 0, [previewRows]);
@@ -56,8 +57,9 @@ export default function App() {
       body: JSON.stringify({ uploaded_path: activePath }),
     })
     const data = await response.json()
-    setAuditReport(data.auditReport);
+    setAuditReport(data.audit_report);
     setPreviewRows(data.cleaned_rows || [])
+    setExcelPath(data.excel_output_path)
   }
 
   return (
@@ -97,6 +99,17 @@ export default function App() {
             <div className="mt-4">
               <AuditReport report={auditReport} />
             </div>
+              {/* Download button — only shows after analysis completes */}
+            {excelPath && (
+              <a
+                href={`http://localhost:5001/api/download?filename=${excelPath}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block mt-3 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+              >
+                Download Clean Excel
+              </a>
+            )}
           </section>
         </div>
       </div>

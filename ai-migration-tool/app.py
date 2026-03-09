@@ -7,6 +7,7 @@ from flask_cors import CORS
 
 from routes.analyze import analyze_bp
 from routes.upload import upload_bp
+from routes.download import download_bp
 
 from dotenv import load_dotenv
 
@@ -36,7 +37,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(upload_bp, url_prefix="/api")
     app.register_blueprint(analyze_bp, url_prefix="/api")
-
+    app.register_blueprint(download_bp, url_prefix="/api")
     return app
 
 
