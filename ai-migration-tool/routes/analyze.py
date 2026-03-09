@@ -34,8 +34,15 @@ def analyze():
         return jsonify({"error": "Missing uploaded_path"}), 400
     # load the data
     raw_df = load_legacy_csv(uploaded_path)
-    # Claude analysis
+    # send to claude the raw dataframe for analysis (field mapping and readiness analysis)
     claude_out = run_migration_readiness_analysis(raw_df)
+    # parse Claude's response 
+    audit_report = {
+        'field_mappings':    claude_out['field_mappings'],
+        'unmapped_columns':  claude_out['unmapped_columns'],
+        'readiness':         claude_out['readiness'],
+        'audit_report_text': claude_out['audit_report_text'],
+    }
     # Uses claude's response to dynamically clean data and update column names
     clean_df = dynamic_cleaning(raw_df, claude_out)
     # outputs the cleaned data
@@ -44,7 +51,7 @@ def analyze():
     return jsonify(
         {
             "message": "Analysis complete (stubbed)",
-            "excel_output_path": excel_output_path,
+            "excel_output_path": excel_path,
             "audit_report": audit_report,
             "cleaned_rows": clean_df.to_dict(orient="records")
         }
