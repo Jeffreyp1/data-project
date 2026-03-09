@@ -8,6 +8,9 @@ from flask_cors import CORS
 from routes.analyze import analyze_bp
 from routes.upload import upload_bp
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def create_app() -> Flask:
     """

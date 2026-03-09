@@ -26,12 +26,7 @@ def load_legacy_csv(csv_path: str) -> pd.DataFrame:
     except FileNotFoundError:
         print("File not found:", csv_path)
         return pd.DataFrame()
-def standardize_country(value):
-    try:
-        country = pycountry.countries.search_fuzzy(value)[0]
-        return country.alpha_2
-    except:
-        return value
+
 
 def clean_legacy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -173,6 +168,157 @@ def write_clean_excel(
 
     df.to_excel(out_path, index = False)
     return out_path
+
+
+import re
+import pycountry
+
+def strip_currency(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        return re.sub(r'[$,\s]', '', str(value)).strip()
+    return series.apply(convert)
+
+
+def normalize_phone(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        digits = re.sub(r'\D', '', str(value))
+        # Strip leading country code if already 11 digits starting with 1
+        if len(digits) == 11 and digits.startswith('1'):
+            digits = digits[1:]
+        if len(digits) == 10:
+            return f'+1{digits}'
+        return 'INVALID'
+    return series.apply(convert)
+
+
+def normalize_email(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        value = str(value).strip().lower()
+        # Must have exactly one @ with something on both sides and a dot after @
+        if re.match(r'^[^@]+@[^@]+\.[^@]+$', value):
+            return value
+        return 'INVALID'
+    return series.apply(convert)
+
+
+def strip_whitespace(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        return str(value).strip()
+    return series.apply(convert)
+
+
+def normalize_id(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        value = str(value).strip().upper()
+        # Zero-pad to 10 characters if numeric
+        if value.isdigit():
+            return value.zfill(10)
+        return value
+    return series.apply(convert)
+
+
+def flag_missing(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        return str(value).strip()
+    return series.apply(convert)
+
+
+def standardize_country(series):
+    def convert(value):
+        if not value or str(value).strip() == '':
+            return 'MISSING VALUE'
+        value = str(value).strip()
+        if len(value) == 2:
+            match = pycountry.countries.get(alpha_2=value.upper())
+            if match:
+                return match.alpha_2
+        if len(value) == 3:
+            match = pycountry.countries.get(alpha_3=value.upper())
+            if match:
+                return match.alpha_2
+        try:
+            results = pycountry.countries.search_fuzzy(value)
+            if results:
+                return results[0].alpha_2
+        except LookupError:
+            pass
+        return 'UNKNOWN'
+    return series.apply(convert)
+
+
+def get_cleaning_toolkit():
+    return {
+        'strip_currency':      strip_currency,
+        'normalize_phone':     normalize_phone,
+        'normalize_email':     normalize_email,
+        'strip_whitespace':    strip_whitespace,
+        'normalize_id':        normalize_id,
+        'flag_missing':        flag_missing,
+        'standardize_country': standardize_country,
+    }
+
+def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFrame:
+    toolkit = get_cleaning_toolkit()
+    res = pd.DataFrame()
+    ##extracts response from claude 
+    for mapping in mapping_instructions["field_mappings"]:
+        source = mapping['source']
+        target = mapping['target']
+        cleaning_fn = mapping['cleaning_fn']
+        confidence = mapping['confidence']
+        ## ensure that claude did not hallucinate and change the original source mapping
+        if source not in df.columns:
+            continue
+        ## if ensures that we do not add anything with low confidence level
+        if confidence < 0.80:
+            result[f'REVIEW___{target}'] = df[source]
+            continue
+
+        func = toolkit.get(cleaning_fn, toolkit[`strip_whitespace`])
+        result[target] = func(df[source])
+    
+    for col in mapping_instructions.get('unmapped_column', []):
+        if col in df.columns:
+            result[f'UNMAPPED__{col}'] = df[col]
+
+    
+
+    # below are required columns. if empty/null, automatically flag
+    required = {'KUNNR', 'NAME1'}
+    mapped_targets = set()
+    for m in mapping_instructions['field_mappings']:
+        mapped_targets.add(m['targets'])
+    low_confidence = False
+    for m in mapping_instructions['confidence']:
+        if m['confidence'] < 0.80:
+            low_confidence = True
+            break
+    # maps each result to whether it should be blocked, needs review, or is ready.
+    if not required.issubset(mapped_targets):
+        result['Migration_Status'] = 'BLOCKED'
+    elif low_confidence:
+        result['Migration_Status'] = 'NEEDS_REVIEW'
+    else:
+        result['Migration_Status'] = 'READY'
+    return result
+
+        
+
+
+
+
 
 if __name__ == "__main__":
     df = load_legacy_csv("uploads/data_sample.csv")
