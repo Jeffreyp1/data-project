@@ -6,6 +6,7 @@ from services.cleaner import (
     clean_legacy_dataframe,
     load_legacy_csv,
     write_clean_excel,
+    dynamic_cleaning
 )
 from services.claude_service import run_migration_readiness_analysis
 
@@ -31,23 +32,14 @@ def analyze():
 
     if not uploaded_path:
         return jsonify({"error": "Missing uploaded_path"}), 400
-
-    ## load the data
+    # load the data
     raw_df = load_legacy_csv(uploaded_path)
-    if raw_df.empty or len(raw_df.columns) == 0:
-        return jsonify({"error": "File not found or file could not be read"}), 404
-
-    ## transform data 
-    try:
-        clean_df = clean_legacy_dataframe(raw_df)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    # 3) AI analysis (WIP)
-    audit_report = run_migration_readiness_analysis(clean_df)
-
-    # 4) Write clean Excel output
-    excel_output_path = write_clean_excel(clean_df)
+    # Claude analysis
+    claude_out = run_migration_readiness_analysis(raw_df)
+    # Uses claude's response to dynamically clean data and update column names
+    clean_df = dynamic_cleaning(raw_df, claude_out)
+    # outputs the cleaned data
+    excel_path = write_clean_excel(clean_df)
 
     return jsonify(
         {
