@@ -318,13 +318,30 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFra
         if m['confidence'] < 0.80:
             low_confidence = True
             break
+    statuses = []
+
+    for index, row in result.iterrows():
+        # original state. status will change depending on row values
+        status = 'READY'
+        if not required.issubset(mapped_targets):
+            status = 'BLOCKED'
+        else: 
+            for field in required:
+                if field in result.columns and row[field] in ('MISSING VALUE', 'INVALID', 'nan', ''):
+                    status = 'FLAGGED'
+                    break
+        if status == 'READY':
+            for col in result.columns:
+                if row[col] in ('MISSING VALUE', 'INVALID'):
+                    status = 'NEEDS_REVIEW'
+                    break
+        
     # maps each result to whether it should be blocked, needs review, or is ready.
-    if not required.issubset(mapped_targets):
-        result['Migration_Status'] = 'BLOCKED'
-    elif low_confidence:
-        result['Migration_Status'] = 'NEEDS_REVIEW'
-    else:
-        result['Migration_Status'] = 'READY'
+
+        if low_confidence and status == 'READY':
+            status= 'NEEDS_REVIEW'
+        statuses.append(status)
+    result['Migration_Status'] = statuses
     return result
 
         
