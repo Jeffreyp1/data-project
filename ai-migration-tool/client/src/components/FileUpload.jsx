@@ -13,12 +13,10 @@ export default function FileUpload({ onUpload, onAnalyze }) {
   const [selectedFile, setSelectedFile] = useState(null);
 
   function handlePickClick() {
-    // TODO: open the file picker
     inputRef.current?.click();
   }
 
   function handleFileChange(e) {
-    // TODO: store selected file + validate CSV extension/type
     const file = e.target.files?.[0] ?? null;
     setSelectedFile(file);
   }
@@ -26,7 +24,6 @@ export default function FileUpload({ onUpload, onAnalyze }) {
   async function handleUploadClick() {
     if (!selectedFile) return
     await onUpload?.(selectedFile)
-    // Reset so the same file can be uploaded again
     setSelectedFile(null)
     if (inputRef.current) {
         inputRef.current.value = ''
@@ -34,7 +31,6 @@ export default function FileUpload({ onUpload, onAnalyze }) {
   }
 
   async function handleAnalyzeClick() {
-    // TODO: call props.onAnalyze() and handle UI states (loading, error)
     await onAnalyze?.();
   }
 
@@ -79,13 +75,6 @@ export default function FileUpload({ onUpload, onAnalyze }) {
         >
           Upload
         </button>
-        {/* <button
-          type="button"
-          onClick={handleAnalyzeClick}
-          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
-        >
-          Analyze
-        </button> */}
       </div>
     </div>
   );

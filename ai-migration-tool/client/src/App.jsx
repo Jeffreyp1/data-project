@@ -5,15 +5,6 @@ import DataTable from "./components/DataTable.jsx";
 import AuditReport from "./components/AuditReport.jsx";
 
 export default function App() {
-  /**
-   * Top-level UI orchestration.
-   *
-   * Intended behavior:
-   * - Let user upload CSV
-   * - Show parsed/previewed data in a table
-   * - Trigger backend analysis pipeline
-   * - Display Claude-generated audit report + provide Excel download link
-   */
   const [uploadedPath, setUploadedPath] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [auditReport, setAuditReport] = useState(null);
