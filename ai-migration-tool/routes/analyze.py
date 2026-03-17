@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
-
+import numpy as np
 from services.cleaner import (
     load_legacy_csv,
     write_clean_excel,
@@ -40,11 +40,12 @@ def analyze():
     schema_type = detect_schema(raw_df)
     schema_info = SAP_SCHEMAS[schema_type]
     # send to claude the raw dataframe for analysis (field mapping and readiness analysis)
-    claude_out = run_migration_readiness_analysis(raw_df, schema_info['schema'], schema_info['label'], required_fields = schema_info['required'])
+    claude_out = run_migration_readiness_analysis(raw_df, schema_info['schema'], schema_info['label'],schema_info['required'])
     # parse Claude's response 
     audit_report = {
         'object_type': schema_type,
         'object_type': schema_info['label'],
+        'required_fields':   list(schema_info['required']),
         'field_mappings':    claude_out['field_mappings'],
         'unmapped_columns':  claude_out['unmapped_columns'],
         'readiness':         claude_out['readiness'],
@@ -59,6 +60,9 @@ def analyze():
         {
             "excel_output_path": excel_path,
             "audit_report": audit_report,
-            "cleaned_rows": clean_df.to_dict(orient="records")
+            "raw_columns":       raw_df.columns.tolist(),
+            "clean_columns":     clean_df.columns.tolist(),
+            "raw_rows":          raw_df.replace({np.nan: None}).to_dict(orient="records"),
+            "cleaned_rows":      clean_df.replace({np.nan: None}).to_dict(orient="records"),
         }
     ), 200
