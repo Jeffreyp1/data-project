@@ -20,12 +20,23 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [excelPath, setExcelPath] = useState(null)
   const [error, setError] = useState(null);
-
+  const [rawRows, setRawRows] = useState([])
+  const [showRaw, setShowRaw] = useState(false)
+  const [rawColumns, setRawColumns] = useState([])
+const [cleanColumns, setCleanColumns] = useState([])
   const hasPreview = useMemo(() => previewRows.length > 0, [previewRows]);
 
   async function handleUpload(file) {
     setIsLoading(true);
     setError(null);
+    setPreviewRows([])
+    setAuditReport(null)
+    setExcelPath(null)
+    setUploadedPath(null)
+    setRawRows([])
+    setShowRaw(false)
+    setRawColumns([])    
+    setCleanColumns([]) 
     try{
       const formData = new FormData();
       formData.append("file", file);
@@ -57,9 +68,12 @@ export default function App() {
       body: JSON.stringify({ uploaded_path: activePath }),
     })
     const data = await response.json()
-    setAuditReport(data.audit_report);
-    setPreviewRows(data.cleaned_rows || [])
-    setExcelPath(data.excel_output_path)
+  setAuditReport(data.audit_report)
+  setPreviewRows(data.cleaned_rows || [])
+  setRawRows(data.raw_rows || [])
+  setRawColumns(data.raw_columns || [])    
+  setCleanColumns(data.clean_columns || [])  
+  setExcelPath(data.excel_output_path)
   }
 
   return (
@@ -82,14 +96,33 @@ export default function App() {
           </section>
 
           <section className="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 className="text-lg font-medium">Data Preview</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Preview of cleaned data will appear here (stub).
-            </p>
-            <div className="mt-4">
-              <DataTable rows={hasPreview ? previewRows : []} />
+    <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-medium">Data Preview</h2>
+        {hasPreview && (
+            <div className="flex gap-2">
+                <button
+                    onClick={() => setShowRaw(false)}
+                    className={`px-3 py-1 text-sm rounded ${!showRaw ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                    Cleaned
+                </button>
+                <button
+                    onClick={() => setShowRaw(true)}
+                    className={`px-3 py-1 text-sm rounded ${showRaw ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                    Raw
+                </button>
             </div>
-          </section>
+        )}
+    </div>
+    <div className="mt-4">
+    <DataTable
+    rows={showRaw ? rawRows : (hasPreview ? previewRows : [])}
+    columns={showRaw ? rawColumns : cleanColumns}
+    showRaw={showRaw}
+/>
+    </div>
+</section>
 
           <section className="rounded-lg border border-slate-200 bg-white p-5">
             <h2 className="text-lg font-medium">AI Audit Report</h2>

@@ -281,7 +281,7 @@ def get_cleaning_toolkit():
         'normalize_name':      normalize_name,
     }
 
-def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFrame:
+def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict, required) -> pd.DataFrame:
     toolkit = get_cleaning_toolkit()
     res = pd.DataFrame()
     ##extracts response from claude
@@ -309,7 +309,7 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict) -> pd.DataFra
     
 
     # below are required columns. if empty/null, automatically flag
-    required = {'KUNNR', 'NAME1'}
+    # required = {'KUNNR', 'NAME1'}
     mapped_targets = set()
     for m in mapping_instructions['field_mappings']:
         mapped_targets.add(m['target'])
