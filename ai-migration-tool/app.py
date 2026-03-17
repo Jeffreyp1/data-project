@@ -14,13 +14,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def create_app() -> Flask:
-    """
-    App factory for the Flask backend.
-
-    - Enables CORS for the React dev server at http://localhost:3000
-    - Registers blueprints for upload + analysis endpoints
-    - Ensures required folders exist (uploads/ and outputs/)
-    """
     app = Flask(__name__)
 
     CORS(

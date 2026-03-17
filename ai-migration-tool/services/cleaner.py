@@ -10,36 +10,20 @@ import re
 from collections import Counter
 
 def load_legacy_csv(csv_path: str) -> pd.DataFrame:
-    """
-    Load a messy legacy business CSV into a DataFrame.
-
-    Intended behavior:
-    - Read CSV with robust defaults (encoding, separators, bad lines)
-    - Preserve raw columns for traceability
-    - Return a DataFrame for subsequent cleaning
-    """
-
     try:
-        ##pd.read_csv is a function that handles the file opening, readingg, header detection
-        ##delimter parsing, and dataframe all in one
-        return pd.read_csv(csv_path, encoding='utf-8')
+        import io
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Quote unquoted currency values like $1,000 or $1,234.56 so the comma
+        # inside them isn't treated as a CSV field delimiter by pandas
+        content = re.sub(r'(?<!["\w])\$[\d,]+(?:\.\d+)?', lambda m: f'"{m.group()}"', content)
+        return pd.read_csv(io.StringIO(content))
     except FileNotFoundError:
         print("File not found:", csv_path)
         return pd.DataFrame()
 
 
 def clean_legacy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Clean and transform the legacy data into a migration-ready shape.
-
-    Intended behavior (examples):
-    - Normalize headers (trim, snake_case, dedupe)
-    - Coerce datatypes (dates, numbers)
-    - Standardize codes (country, currency, units)
-    - Handle missing values and obvious outliers
-    - Create derived fields required by target SAP structures
-    - Return a cleaned DataFrame
-    """
     customer_map = {
         "cust_id": "Customer_ID",
         "customerid": "Customer_ID",
@@ -150,15 +134,6 @@ def write_clean_excel(
     output_dir: Optional[str] = None,
     filename: Optional[str] = None,
 ) -> str:
-    """
-    Write the cleaned DataFrame to an Excel file in `outputs/`.
-
-    Intended behavior:
-    - Choose output directory (default: project `outputs/`)
-    - Generate a unique filename if none provided
-    - Write one or more worksheets (clean data, metadata, etc.)
-    - Return absolute path to written Excel file
-    """
     base_dir = os.path.dirname(os.path.dirname(__file__))
     resolved_output_dir = output_dir or os.path.join(base_dir, "outputs")
     os.makedirs(resolved_output_dir, exist_ok=True)

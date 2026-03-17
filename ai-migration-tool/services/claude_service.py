@@ -81,15 +81,6 @@ def detect_schema(df: pd.DataFrame) -> str:
 
 
 def build_mapping_prompt(df: pd.DataFrame, schema: dict, schema_label: str, required_fields: set) -> str:
-    """
-    Build the prompt for Claude to map legacy fields to SAP target fields.
-
-    Intended behavior:
-    - Summarize columns, sample values, and inferred datatypes
-    - Ask for proposed SAP S/4HANA target fields + transformation rules
-    - Ask for data quality/migration readiness findings
-    - Ask for an audit report format (markdown or structured JSON)
-    """
     columns = df.columns.tolist()
     sample_rows = df.head(5).to_dict(orient='records')
     toolkit_keys = list(get_cleaning_toolkit().keys())
