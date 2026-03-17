@@ -55,10 +55,6 @@ const [cleanColumns, setCleanColumns] = useState([])
   }
 
   async function handleAnalyze(path) {
-    // TODO:
-    // - POST JSON to Flask `/api/analyze` with uploadedPath/file_id
-    // - Receive excel_output_path + audit_report
-    // - Update auditReport + store excel download token/link
     const activePath = path || uploadedPath;
     if (!activePath) return;
     console.log("UploadedPath:", uploadedPath)
