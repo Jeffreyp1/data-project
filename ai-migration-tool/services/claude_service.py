@@ -6,91 +6,8 @@ import json
 import pandas as pd
 from anthropic import Anthropic
 from services.cleaner import get_cleaning_toolkit
+from services.sap_schemas import SAP_SCHEMAS
 
-SAP_CUSTOMER_SCHEMA = {
-    "KUNNR":     "Customer Number (10-digit, zero-padded)",
-    "NAME1":     "Customer Name - Primary (required)",
-    "NAME2":     "Customer Name - Secondary / DBA name (optional)",
-    "TELNR":     "Phone Number (primary)",
-    "TELFX":     "Fax Number",
-    "SMTP_ADDR": "Email Address",
-    "STRAS":     "Street Address",
-    "ORT01":     "City",
-    "PSTLZ":     "Postal Code / ZIP",
-    "REGIO":     "Region / State Code (ISO)",
-    "LAND1":     "Country Code (ISO 2-letter, required)",
-    "UMSAV":     "Annual Revenue (numeric, no currency symbol)",
-    "WAERS":     "Currency Code (USD, EUR, GBP)",
-    "KDGRP":     "Customer Group / Segment",
-    "AUFSD":     "Order Block Flag (blank = active, * = blocked)",
-}
-
-SAP_VENDOR_SCHEMA = {
-    "LIFNR":     "Vendor Number (10-digit, zero-padded, required)",
-    "NAME1":     "Vendor Name - Primary (required)",
-    "NAME2":     "Vendor Name - Secondary (optional)",
-    "TELNR":     "Phone Number",
-    "SMTP_ADDR": "Email Address",
-    "STRAS":     "Street Address",
-    "ORT01":     "City",
-    "PSTLZ":     "Postal Code / ZIP",
-    "LAND1":     "Country Code (ISO 2-letter, required)",
-    "WAERS":     "Currency Code",
-    "ZTERM":     "Payment Terms (e.g. NET30, NET60)",
-    "SPERM":     "Purchasing Block Flag (blank = active, X = blocked)",
-}
-
-SAP_MATERIAL_SCHEMA = {
-    "MATNR":     "Material Number (18-char max, required)",
-    "MAKTX":     "Material Description (required)",
-    "MATKL":     "Material Group / Category Code",
-    "MEINS":     "Base Unit of Measure (EA, KG, LB, PC)",
-    "MTART":     "Material Type (FERT=Finished, ROH=Raw, HALB=Semi-finished)",
-    "MBRSH":     "Industry Sector (M=Mechanical, E=Electrical, etc.)",
-    "NTGEW":     "Net Weight (numeric)",
-    "BRGEW":     "Gross Weight (numeric)",
-    "GEWEI":     "Weight Unit (KG, LB)",
-    "VOLUM":     "Volume (numeric)",
-    "VOLEH":     "Volume Unit (L, GAL, CM3)",
-}
-
-SAP_EMPLOYEE_SCHEMA = {
-    "PERNR":     "Personnel Number (8-digit, zero-padded, required)",
-    "VORNA":     "First Name (required)",
-    "NACHN":     "Last Name (required)",
-    "GBDAT":     "Date of Birth (YYYY-MM-DD)",
-    "AEDTM":     "Hire Date (YYYY-MM-DD)",
-    "PLANS":     "Position Code",
-    "ORGEH":     "Organizational Unit",
-    "STELL":     "Job Code",
-    "WERKS":     "Plant / Work Location Code",
-    "MOLGA":     "Country Grouping (01=USA, 02=Canada)",
-    "ANSVH":     "Employment Status (1=Active, 0=Inactive)",
-}
-
-
-SAP_SCHEMAS = {
-    "customer": {
-        "schema":   SAP_CUSTOMER_SCHEMA,
-        "required": {"KUNNR", "NAME1"},
-        "label":    "SAP Customer Master (KNA1)"
-    },
-    "vendor": {
-        "schema":   SAP_VENDOR_SCHEMA,
-        "required": {"LIFNR", "NAME1"},
-        "label":    "SAP Vendor Master (LFA1)"
-    },
-    "material": {
-        "schema":   SAP_MATERIAL_SCHEMA,
-        "required": {"MATNR", "MAKTX"},
-        "label":    "SAP Material Master (MARA)"
-    },
-    "employee": {
-        "schema":   SAP_EMPLOYEE_SCHEMA,
-        "required": {"PERNR", "VORNA", "NACHN"},
-        "label":    "SAP Employee Master (PA0001)"
-    },
-}
 def _get_anthropic_client() -> Anthropic:
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -234,9 +151,11 @@ def build_mapping_prompt(df: pd.DataFrame, schema: dict, schema_label: str, requ
             NEEDS_REVIEW — one or more mappings below 0.80 confidence
             BLOCKED     — a required field {required_values} is missing entirely
 
-        6. Write a short plain-English audit_report_text (3-5 sentences)
-        summarizing what you found, what was cleaned, and what needs
-        human attention. Write it as if addressing an SAP consultant.
+        6. Write a concise audit_report_text covering these points in order:
+        - One sentence: how many of the 5 SAMPLE records are migration-ready — explicitly state "based on 5 sample rows" so it is clear this is not the full dataset
+        - Bullet list of what was successfully auto-cleaned (e.g. phones normalized, country codes standardized)
+        - Bullet list of what needs consultant attention (low confidence mappings, missing fields, format issues)
+        Keep each bullet to one line. No long paragraphs. 
 
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         RESPONSE FORMAT
@@ -265,19 +184,7 @@ def build_mapping_prompt(df: pd.DataFrame, schema: dict, schema_label: str, requ
 
 
 def run_migration_readiness_analysis(df: pd.DataFrame, schema: dict, schema_label: str, required: set) -> Dict[str, Any]:
-    """
-    Call Claude to perform field mapping and migration readiness analysis.
 
-    Intended behavior:
-    - Create client
-    - Build prompt from `df`
-    - Send request to a chosen Claude model
-    - Parse the response into a structured dict:
-      - recommended_field_mappings
-      - required_transformations
-      - readiness_score / blockers
-      - audit_report_text
-    """
 
     _client = _get_anthropic_client()
     _prompt = build_mapping_prompt(df, schema, schema_label, required)
@@ -293,11 +200,14 @@ def run_migration_readiness_analysis(df: pd.DataFrame, schema: dict, schema_labe
 
     try:
         resp = _client.messages.create(
-            model="claude-opus-4-6", max_tokens=1024, messages=[{"role": "user", "content": _prompt}]
+            model="claude-opus-4-6", max_tokens=2048, messages=[{"role": "user", "content": _prompt}]
         )
         #transform the response into text
         resp_text = resp.content[0].text
         result_text = resp_text.replace("```json", "").replace("```", "").strip()
+        start = result_text.find('{')
+        end   = result_text.rfind('}') + 1
+        result_text = result_text[start:end]
         return json.loads(result_text)
     except json.JSONDecodeError as e:
         print(f"Claude returned invalid JSON: {e}")
