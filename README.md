@@ -1,3 +1,7 @@
+# Project Demo
+Youtube link: https://youtu.be/xVY-kSFzh08
+
+
 # MapAI — SAP Data Migration with AI integration
 
 MapAI is a prototype that uses Claude AI to automate the SAP S/4HANA data migration process. Upload a legacy CSV file and the tool will automatically detect what type of SAP master data it contains, map each column to the correct SAP field, apply appropriate data cleaning, and generate a migration readiness report.
