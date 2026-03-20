@@ -7,6 +7,9 @@ import pandas as pd
 from anthropic import Anthropic
 from services.cleaner import get_cleaning_toolkit
 from services.sap_schemas import SAP_SCHEMAS
+import logging
+
+logger = logging.getLogger(__name__)
 
 def _get_anthropic_client() -> Anthropic:
 
@@ -72,11 +75,11 @@ def detect_schema(df: pd.DataFrame) -> str:
         detected = resp.content[0].text.strip().lower()
         #customer becomes the default if we can't detect it
         if detected not in SAP_SCHEMAS:
-            print(f"Claude returned unknown type '{detected}'. Defaulting to customer schema")
+            logger.info(f"Claude returned unknown type '{detected}'. Defaulting to customer schema")
             return "customer"
         return detected
     except Exception as e:
-        print(f"schema detectionn failed: {e}. Defaulting to customer chema")
+        logger.error(f"schema detectionn failed: {e}. Defaulting to customer chema")
         return "customer"
 
 
@@ -201,11 +204,11 @@ def run_migration_readiness_analysis(df: pd.DataFrame, schema: dict, schema_labe
         result_text = result_text[start:end]
         return json.loads(result_text)
     except json.JSONDecodeError as e:
-        print(f"Claude returned invalid JSON: {e}")
+        logger.error(f"Claude returned invalid JSON: {e}")
         return fallback
 
     except Exception as e:
-        print(f"Error calling Claude API: {e}")
+        logger.error(f"Error calling Claude API: {e}")
         return fallback
 
 

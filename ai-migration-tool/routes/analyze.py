@@ -18,17 +18,6 @@ analyze_bp = Blueprint("analyze", __name__)
 
 @analyze_bp.route("/analyze", methods=["POST"])
 def analyze():
-    """
-    Run the end-to-end analysis pipeline for a previously uploaded CSV.
-
-    Intended behavior:
-    - Receive an identifier for the uploaded CSV (e.g., file_id)
-    - Load the raw CSV into pandas
-    - Clean/transform with the cleaner service
-    - Call Claude to do field mapping + migration readiness analysis
-    - Write a clean Excel output to `outputs/`
-    - Return metadata: excel filename/path token + audit report content
-    """
     payload = request.get_json(silent=True) or {}
     uploaded_path = payload.get("uploaded_path")
 

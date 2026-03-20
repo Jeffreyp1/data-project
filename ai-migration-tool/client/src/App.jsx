@@ -67,9 +67,9 @@ const [cleanColumns, setCleanColumns] = useState([])
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-6xl px-6 py-10">
         <header className="mb-8">
-          <h1 className="text-2xl font-semibold">AI Data Migration Tool</h1>
+          <h1 className="text-2xl font-semibold">MapAI</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Upload legacy CSV → clean/transform → AI mapping + readiness → export Excel + audit report.
+            Upload legacy CSV → AI schema detection + field mapping → clean/transform → export Excel + audit report.
           </p>
         </header>
         {isLoading && <p className="text-sm text-slate-500">Uploading...</p>}

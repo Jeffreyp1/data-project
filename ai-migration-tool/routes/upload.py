@@ -7,18 +7,13 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 
 import pandas as pd
+import logging
 
+logger = logging.getLogger(__name__)
 upload_bp = Blueprint("upload", __name__)
 
 
 def _allowed_file(filename: str) -> bool:
-    """
-    Return True if the filename is an allowed upload type.
-
-    Intended behavior:
-    - Accept only CSV uploads
-    - Guard against missing extensions
-    """
     if not filename:
         return False
     
@@ -26,14 +21,6 @@ def _allowed_file(filename: str) -> bool:
 
 
 def _save_upload_to_disk(file_storage: Any) -> str:
-    """
-    Persist an uploaded CSV to the `uploads/` directory.
-
-    Intended behavior:
-    - Generate a unique safe filename
-    - Save to app.config["UPLOAD_FOLDER"]
-    - Return absolute path to the saved file
-    """
     upload_dir = os.path.abspath(current_app.config["UPLOAD_FOLDER"])
     unique_name = f"{uuid.uuid4().hex}.csv"
     path = os.path.abspath(os.path.join(upload_dir, unique_name))
@@ -49,15 +36,6 @@ def _save_upload_to_disk(file_storage: Any) -> str:
 
 @upload_bp.route("/upload", methods=["POST"])
 def upload_csv():
-    """
-    Handle CSV upload from the frontend.
-
-    Intended behavior:
-    - Validate multipart form-data (expects `file`)
-    - Validate file type
-    - Save to `uploads/`
-    - Return a file_id or server path token for later analysis
-    """
     if "file" not in request.files:
         return jsonify({"error": "No file part in request"}), 400
 

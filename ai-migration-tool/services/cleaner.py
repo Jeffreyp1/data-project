@@ -8,7 +8,8 @@ import pycountry
 import pandas as pd
 import re
 from collections import Counter
-
+import logging
+logger = logging.getLogger(__name__)
 def load_legacy_csv(csv_path: str) -> pd.DataFrame:
     try:
         import io
@@ -19,7 +20,7 @@ def load_legacy_csv(csv_path: str) -> pd.DataFrame:
         content = re.sub(r'(?<!["\w])\$[\d,]+(?:\.\d+)?', lambda m: f'"{m.group()}"', content)
         return pd.read_csv(io.StringIO(content))
     except FileNotFoundError:
-        print("File not found:", csv_path)
+        logger.error(f"File not found: {csv_path}")
         return pd.DataFrame()
 
 
@@ -42,11 +43,22 @@ def write_clean_excel(
 
 
 import re
+import math
 import pycountry
+
+def _is_missing(value):
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    if str(value).strip().lower() in ('', 'nan'):
+        return True
+    return False
+
 
 def strip_currency(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         return re.sub(r'[$,\s]', '', str(value)).strip()
     return series.apply(convert)
@@ -54,7 +66,7 @@ def strip_currency(series):
 
 def normalize_phone(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         digits = re.sub(r'\D', '', str(value))
         # Strip leading country code if already 11 digits starting with 1
@@ -68,7 +80,7 @@ def normalize_phone(series):
 
 def normalize_email(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         value = str(value).strip().lower()
         # Must have exactly one @ with something on both sides and a dot after @
@@ -80,7 +92,7 @@ def normalize_email(series):
 
 def strip_whitespace(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         return str(value).strip()
     return series.apply(convert)
@@ -88,7 +100,7 @@ def strip_whitespace(series):
 
 def normalize_id(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         value = str(value).strip().upper()
         # Zero-pad to 10 characters if numeric
@@ -100,7 +112,7 @@ def normalize_id(series):
 
 def flag_missing(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         return str(value).strip()
     return series.apply(convert)
@@ -108,7 +120,7 @@ def flag_missing(series):
 
 def standardize_country(series):
     def convert(value):
-        if not value or str(value).strip() == '':
+        if _is_missing(value):
             return 'MISSING VALUE'
         value = str(value).strip()
         if len(value) == 2:
@@ -129,16 +141,10 @@ def standardize_country(series):
     return series.apply(convert)
 
 def normalize_name(series):
-    import math
     def convert(value):
-        if value is None:
+        if _is_missing(value):
             return 'MISSING VALUE'
-        if isinstance(value, float) and math.isnan(value):
-            return 'MISSING VALUE'
-        value = str(value).strip()
-        if value == '' or value.lower() == 'nan':
-            return 'MISSING VALUE'
-        return value.title()
+        return str(value).strip().title()
     return series.apply(convert)
 def get_cleaning_toolkit():
     return {
@@ -198,12 +204,12 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict, required) -> 
             status = 'BLOCKED'
         else: 
             for field in required:
-                if field in result.columns and row[field] in ('MISSING VALUE', 'INVALID', 'nan', ''):
+                if field in result.columns and (pd.isna(row[field]) or str(row[field]).strip() in ('MISSING VALUE', 'INVALID', 'nan', 'NAN', '')):
                     status = 'FLAGGED'
                     break
         if status == 'READY':
             for col in result.columns:
-                if row[col] in ('MISSING VALUE', 'INVALID'):
+                if pd.isna(row[col]) or str(row[col]).strip() in ('MISSING VALUE', 'INVALID', 'nan', 'NAN', ''):
                     status = 'NEEDS_REVIEW'
                     break
         
@@ -221,8 +227,8 @@ def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict, required) -> 
 
 
 
-if __name__ == "__main__":
-    df = load_legacy_csv("uploads/data_sample.csv")
-    print("Raw columns:", df.columns.tolist())
-    cleaned = clean_legacy_dataframe(df)
-    print(cleaned)
+# if __name__ == "__main__":
+#     df = load_legacy_csv("uploads/data_sample.csv")
+#     print("Raw columns:", df.columns.tolist())
+#     cleaned = clean_legacy_dataframe(df)
+#     print(cleaned)
