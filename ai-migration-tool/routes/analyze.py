@@ -9,9 +9,12 @@ from services.cleaner import (
 )
 from services.claude_service import (
     run_migration_readiness_analysis,
-    detect_schema
+    detect_schema,
+    run_agent
 )
 from services.sap_schemas import SAP_SCHEMAS
+import logging
+logger = logging.getLogger(__name__)
 
 analyze_bp = Blueprint("analyze", __name__)
 
@@ -26,22 +29,25 @@ def analyze():
     # load the data
     raw_df = load_legacy_csv(uploaded_path)
 
-    schema_type = detect_schema(raw_df)
-    schema_info = SAP_SCHEMAS[schema_type]
-    # send to claude the raw dataframe for analysis (field mapping and readiness analysis)
-    claude_out = run_migration_readiness_analysis(raw_df, schema_info['schema'], schema_info['label'],schema_info['required'])
-    # parse Claude's response 
+    # schema_type = detect_schema(raw_df)
+    # schema_info = SAP_SCHEMAS[schema_type]
+    # # send to claude the raw dataframe for analysis (field mapping and readiness analysis)
+    # claude_out = run_migration_readiness_analysis(raw_df, schema_info['schema'], schema_info['label'],schema_info['required'])
+    claude_out = run_agent(raw_df)
+    agent_result = claude_out.get("generate_audit_summary", {})
+    schema_type = agent_result.get("schema_type", "customer")
+    schema_info = SAP_SCHEMAS.get(schema_type, SAP_SCHEMAS["customer"])
+    # parse Claude's response
     audit_report = {
-        'object_type': schema_type,
-        'object_type': schema_info['label'],
+        'object_type':       schema_info['label'],
         'required_fields':   list(schema_info['required']),
-        'field_mappings':    claude_out['field_mappings'],
-        'unmapped_columns':  claude_out['unmapped_columns'],
-        'readiness':         claude_out['readiness'],
-        'audit_report_text': claude_out['audit_report_text'],
+        'field_mappings':    agent_result.get('field_mappings', []),
+        'unmapped_columns':  agent_result.get('unmapped_columns', []),
+        'readiness':         agent_result.get('readiness', {"status": "BLOCKED", "reasons": ["Agent did not return readiness"]}),
+        'audit_report_text': claude_out.get('summary', ''),
     }
     # Uses claude's response to dynamically clean data and update column names
-    clean_df = dynamic_cleaning(raw_df, claude_out, schema_info['required'])
+    clean_df = dynamic_cleaning(raw_df, agent_result, schema_info['required'])
     # outputs the cleaned data
     excel_path = write_clean_excel(clean_df)
 
