@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import FileUpload from "./components/FileUpload.jsx";
 import DataTable from "./components/DataTable.jsx";
 import AuditReport from "./components/AuditReport.jsx";
+import CorrectionChat from "./components/CorrectionChat.jsx";
 
 export default function App() {
   const [uploadedPath, setUploadedPath] = useState(null);
@@ -110,6 +111,23 @@ const [cleanColumns, setCleanColumns] = useState([])
 />
     </div>
 </section>
+
+          {auditReport && (
+            <section className="rounded-lg border border-slate-200 bg-white p-5">
+              <h2 className="text-lg font-medium mb-1">Corrections</h2>
+              <p className="text-sm text-slate-500 mb-4">
+                Ask Claude to remap columns, adjust cleaning rules, or provide context about your data.
+              </p>
+              <CorrectionChat
+                uploadedPath={uploadedPath}
+                onCorrectionApplied={(data) => {
+                  setPreviewRows(data.cleaned_rows || [])
+                  setCleanColumns(data.clean_columns || [])
+                  setAuditReport(prev => ({ ...prev, field_mappings: data.field_mappings }))
+                }}
+              />
+            </section>
+          )}
 
           <section className="rounded-lg border border-slate-200 bg-white p-5">
             <h2 className="text-lg font-medium">AI Audit Report</h2>

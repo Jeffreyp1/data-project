@@ -64,6 +64,26 @@ agent_tools = [
             "required": ["columns", "sample_rows", "schema_type"]
         }
     },
+    {
+        "name": "generate_cleaning_function",
+            "description": """
+                Call this tool when a column has a cleaning_fn that does not exist in the 
+                available toolkit. Generate a Python function to clean and standardize the 
+                source column data to match the expected SAP field format.
+                Only generate functions for mapped columns — skip unmapped_columns entirely.
+            """,
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "function_name" : {"type": "string", "description": "name of the generated function"},
+                    "target_column": {"type": "string", "description": "source olumn this function cleans"} ,
+                    "sap_field": {"type": "string", "description": "SAP field this column maps to"},
+
+                },
+                "required": ["field_mappings", "schema_type", "readiness"]
+            }
+    }
+    ,
     {"name": "generate_audit_summary",
         "description": """
             Call this last once you have called detect_SAP_schema, map_columns_to_sap_fields, and validate_mapping_completeness.
@@ -95,16 +115,8 @@ agent_tools = [
                         }
                     }
                 },
-                "columns": {
-                    "type": "array",
-                    "items":{"type": "string"},
-                    "description": "column names retrieved that must be mapped to SAP fields"
-                },
                 "unmapped_columns":{
                     "type": "array"
-                },
-                "validation_result": {
-                    "type": "object"
                 },
                 "schema_type":{
                     "type": "string"
@@ -149,6 +161,15 @@ def execute_tool(df: pd.DataFrame, tool_name: str, tool_input: dict) -> dict:
             "sample_rows": sample_rows,
             "schema_type": SAP_SCHEMAS[tool_input["schema_type"]]
         }
+    elif tool_name == "generate_cleaning_function":
+        return {
+            "success": True,
+            "sample_rows": sample_rows,
+            "field_mappings": tool_input["field_mappings"],
+            "unmapped_columns": tool_input.get("unmapped_columns", []),
+            "available_toolkit_keys": list(get_cleaning_toolkit().keys()),
+            "schema_type": tool_input["schema_type"],
+        }
     elif tool_name == "generate_audit_summary":
         return {
             "success": True,
@@ -160,6 +181,96 @@ def execute_tool(df: pd.DataFrame, tool_name: str, tool_input: dict) -> dict:
         }
     
     return {"success": False, "error": f"Unknown tool: {tool_name}"}
+def run_correction(user_message: str, agent_result: dict) -> dict:
+    client = _get_anthropic_client()
+
+    # pull current state from cache
+    current_mappings = agent_result.get("field_mappings", [])
+    unmapped_columns = agent_result.get("unmapped_columns", [])
+    business_context = agent_result.get("business_context", [])
+    toolkit_keys     = list(get_cleaning_toolkit().keys())
+
+    prompt = f"""
+    You are an SAP data migration assistant helping a user correct their field mappings and cleaning rules.
+
+    CURRENT FIELD MAPPINGS:
+    {json.dumps(current_mappings, indent=2)}
+
+    UNMAPPED COLUMNS (do not map these unless user explicitly asks):
+    {json.dumps(unmapped_columns, indent=2)}
+
+    AVAILABLE CLEANING FUNCTIONS:
+    {json.dumps(toolkit_keys, indent=2)}
+
+    EXISTING BUSINESS CONTEXT:
+    {json.dumps(business_context, indent=2)}
+
+    USER INSTRUCTION:
+    {user_message}
+
+    Parse the user's intent and return ONLY valid JSON:
+    {{
+        "updated_mappings": [...],
+        "cleaning_instructions": [
+            {{
+                "column": "source_column_name",
+                "instruction": "what the user wants done",
+                "generate_function": true/false
+            }}
+        ],
+        "business_context": ["any domain rules or context the user provided"],
+        "excluded_columns": ["columns the user wants removed"],
+        "confirmation": "one sentence — what you understood and applied",
+        "unresolved": ["anything you could not confidently act on"]
+    }}
+
+    Rules:
+    - Only change mappings the user explicitly mentions
+    - Set generate_function to true if the cleaning instruction requires a function not in available toolkit
+    - If nothing changed in a category, return an empty array for that field
+    """
+
+    # safe fallback — preserves current state if Claude fails
+    fallback = {
+        "updated_mappings":      current_mappings,
+        "cleaning_instructions": [],
+        "business_context":      business_context,
+        "excluded_columns":      [],
+        "confirmation": "Could not apply correction. No changes made.",
+        "unresolved":   [user_message]
+    }
+
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # strip any markdown fences Claude may have added
+        text = resp.content[0].text
+        text = text[text.find('{'):text.rfind('}')+1]
+
+        result = json.loads(text)
+
+        # append new business context on top of existing — never overwrite
+        result["business_context"] = business_context + result.get("business_context", [])
+
+        # build confirmation echo — append unresolved items if any
+        if result.get("unresolved"):
+            result["confirmation"] += " Could not apply: " + ", ".join(result["unresolved"])
+
+        logger.info(f"Correction applied: {result['confirmation']}")
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Correction returned invalid JSON: {e}")
+        return fallback
+
+    except Exception as e:
+        logger.error(f"Correction failed: {e}")
+        return fallback
+
 
 def run_agent(df: pd.DataFrame)-> str:
     client = _get_anthropic_client()
@@ -192,9 +303,9 @@ def run_agent(df: pd.DataFrame)-> str:
                     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                     {json.dumps(sap_types, indent=2)}
                     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                        AVAILABLE CLEANING FUNCTIONS
-                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                        {json.dumps(toolkit_keys, indent=2)}
+                    AVAILABLE CLEANING FUNCTIONS
+                    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    {json.dumps(toolkit_keys, indent=2)}
                     """)
                     
         }
@@ -256,6 +367,7 @@ def _get_anthropic_client() -> Anthropic:
         raise ValueError("ANTHROPIC_API_KEY not set in .env")
     return Anthropic(api_key=api_key)
 
+    
 def detect_schema(df: pd.DataFrame) -> str:
     columns = df.columns.tolist()
     sample_rows = df.head(5).to_dict(orient='records')
@@ -449,19 +561,3 @@ def run_migration_readiness_analysis(df: pd.DataFrame, schema: dict, schema_labe
         return fallback
 
 
-
-
-
-# df = pd.read_csv('/Users/jeffrey/Downloads/Demo CSV files/customer_missing_id.csv')
-
-# # Test detect
-# out = execute_tool(df, 'detect_SAP_schema', {'columns': [], 'sample_rows': []})
-# print('detect:', out['success'], len(out['columns']) > 0)
-
-# # Test map
-# out = execute_tool(df, 'map_columns_to_sap_fields', {'schema_type': 'customer', 'field_mappings': [{'source': 'cust_id', 'target': 'KUNNR'}]})
-# print('map:', out['success'], out['validation'])
-
-# # Test audit
-# out = execute_tool(df, 'generate_audit_summary', {})
-# print('audit:', out['success'])
