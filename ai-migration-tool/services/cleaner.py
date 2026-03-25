@@ -158,11 +158,14 @@ def get_cleaning_toolkit():
         'normalize_name':      normalize_name,
     }
 
-def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict, required) -> pd.DataFrame:
+def dynamic_cleaning(df: pd.DataFrame, mapping_instructions: dict, required, extra_toolkit=None) -> pd.DataFrame:
     toolkit = get_cleaning_toolkit()
-    res = pd.DataFrame()
+
+    if extra_toolkit:
+        toolkit.update(extra_toolkit)
     ##extracts response from claude
     result = pd.DataFrame()
+    logger.info(mapping_instructions)
     for mapping in mapping_instructions["field_mappings"]:
         source = mapping['source']
         target = mapping['target']
