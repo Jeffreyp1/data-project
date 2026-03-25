@@ -8,12 +8,15 @@ from services.cleaner import (
     dynamic_cleaning
 )
 from services.claude_service import (
-    run_migration_readiness_analysis,
-    detect_schema,
     run_agent,
-    run_correction
+    run_correction,
+    generate_function,
+    apply_generated_functions
 )
-from app import cache
+from services.cleaner import(
+    get_cleaning_toolkit
+)
+from extensions import cache
 from services.sap_schemas import SAP_SCHEMAS
 import logging
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ def analyze():
     raw_df = load_legacy_csv(uploaded_path)
     claude_out = run_agent(raw_df)
     agent_result = claude_out.get("generate_audit_summary", {})
+    # cache data using uploaded_path as key
     cache.set(uploaded_path, agent_result)
     schema_type = agent_result.get("schema_type", "customer")
     schema_info = SAP_SCHEMAS.get(schema_type, SAP_SCHEMAS["customer"])
@@ -45,11 +49,13 @@ def analyze():
         'readiness':         agent_result.get('readiness', {"status": "BLOCKED", "reasons": ["Agent did not return readiness"]}),
         'audit_report_text': claude_out.get('summary', ''),
     }
+    # logger.info(claude_out)
     # Uses claude's response to dynamically clean data and update column names
     clean_df = dynamic_cleaning(raw_df, agent_result, schema_info['required'])
     # outputs the cleaned data
     excel_path = write_clean_excel(clean_df)
-
+    logger.info(clean_df.columns.tolist())
+    logger.info(agent_result)
     return jsonify(
         {
             "excel_output_path": excel_path,
@@ -62,8 +68,7 @@ def analyze():
     ), 200
 
 
-# cache backend is configured in app.py (currently SimpleCache)
-# to migrate to Redis: set CACHE_TYPE="RedisCache" and CACHE_REDIS_URL in app.py — no changes needed here
+
 @analyze_bp.route("/correct", methods=["POST"])
 def correct():
     payload       = request.get_json(silent=True) or {}
@@ -80,8 +85,14 @@ def correct():
 
     correction = run_correction(user_message, agent_result)
 
-    # apply updated mappings
-    agent_result["field_mappings"] = correction["updated_mappings"]
+    # add all columns that needs to be cleaned to updated dictionary
+    updated = {}
+    for m in correction["updated_mappings"]:
+        updated[m["source"]] = m
+    # updates cleaning function using key mapping["source"] 
+    for mapping in agent_result["field_mappings"]:
+        if mapping["source"] in updated:
+            mapping.update(updated[mapping["source"]])
 
     # remove excluded columns from mappings
     excluded = set(correction.get("excluded_columns", []))
@@ -94,17 +105,42 @@ def correct():
 
     # accumulate business context
     agent_result["business_context"] = correction["business_context"]
-
-    # update cache with corrected state
-    cache.set(uploaded_path, agent_result)
+    
 
     # re-run cleaning with updated mappings
     raw_df      = load_legacy_csv(uploaded_path)
     schema_type = agent_result.get("schema_type", "customer")
     schema_info = SAP_SCHEMAS.get(schema_type, SAP_SCHEMAS["customer"])
-    clean_df    = dynamic_cleaning(raw_df, agent_result, schema_info["required"])
 
+    needs_function_generation = [i for i in correction.get("cleaning_instructions",[]) if i["generate_function"] == True]
+    
+    #calls claude to generate the functions
+    generated_functions = generate_function(needs_function_generation, raw_df)
+
+    # patch cleaning_fn in field_mappings to match the actual generated function name
+    # so dynamic_cleaning looks up the right function in the toolkit
+    for gen in generated_functions:
+        for mapping in agent_result["field_mappings"]:
+            if mapping["source"] == gen["column"]:
+                mapping["cleaning_fn"] = gen["function_name"]
+                break
+
+    # accumulate generated function code strings in cache — cannot store callables
+    # so we store the raw code and re-exec on every request
+    stored_functions = agent_result.get("generated_function_codes", [])
+    stored_functions = stored_functions + generated_functions
+    agent_result["generated_function_codes"] = stored_functions
+
+    cache.set(uploaded_path, agent_result)
+
+    # re-exec all stored function codes (previous + current) into the toolkit
+    # WIP: add more security features to apply_generated_functions
+    loaded_toolkit = apply_generated_functions(stored_functions, raw_df)
+    clean_df   = dynamic_cleaning(raw_df, agent_result, schema_info["required"], extra_toolkit=loaded_toolkit)
+    # update cache with corrected state
+    excel_path = write_clean_excel(clean_df)
     return jsonify({
+        "excel_output_path": excel_path,
         "confirmation":          correction["confirmation"],
         "cleaning_instructions": correction.get("cleaning_instructions", []),
         "field_mappings":        agent_result["field_mappings"],
