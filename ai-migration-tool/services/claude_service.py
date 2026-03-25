@@ -64,26 +64,6 @@ agent_tools = [
             "required": ["columns", "sample_rows", "schema_type"]
         }
     },
-    {
-        "name": "generate_cleaning_function",
-            "description": """
-                Call this tool when a column has a cleaning_fn that does not exist in the 
-                available toolkit. Generate a Python function to clean and standardize the 
-                source column data to match the expected SAP field format.
-                Only generate functions for mapped columns — skip unmapped_columns entirely.
-            """,
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "function_name" : {"type": "string", "description": "name of the generated function"},
-                    "target_column": {"type": "string", "description": "source olumn this function cleans"} ,
-                    "sap_field": {"type": "string", "description": "SAP field this column maps to"},
-
-                },
-                "required": ["field_mappings", "schema_type", "readiness"]
-            }
-    }
-    ,
     {"name": "generate_audit_summary",
         "description": """
             Call this last once you have called detect_SAP_schema, map_columns_to_sap_fields, and validate_mapping_completeness.
@@ -161,15 +141,6 @@ def execute_tool(df: pd.DataFrame, tool_name: str, tool_input: dict) -> dict:
             "sample_rows": sample_rows,
             "schema_type": SAP_SCHEMAS[tool_input["schema_type"]]
         }
-    elif tool_name == "generate_cleaning_function":
-        return {
-            "success": True,
-            "sample_rows": sample_rows,
-            "field_mappings": tool_input["field_mappings"],
-            "unmapped_columns": tool_input.get("unmapped_columns", []),
-            "available_toolkit_keys": list(get_cleaning_toolkit().keys()),
-            "schema_type": tool_input["schema_type"],
-        }
     elif tool_name == "generate_audit_summary":
         return {
             "success": True,
@@ -181,6 +152,133 @@ def execute_tool(df: pd.DataFrame, tool_name: str, tool_input: dict) -> dict:
         }
     
     return {"success": False, "error": f"Unknown tool: {tool_name}"}
+
+def generate_function(needs_function_generation: list, df: pd.DataFrame) -> list:
+    client = _get_anthropic_client()
+    toolkit_keys = list(get_cleaning_toolkit().keys())
+
+    # attach sample values to each item so Claude sees the actual input format
+    for item in needs_function_generation:
+        col = item["column"]
+        if col in df.columns:
+            item["sample_values"] = df[col].head(5).tolist()
+
+    prompt = f"""
+        You are an SAP data migration assistant. Generate a Python cleaning function
+        for each column listed below.
+
+        REQUIREMENTS:
+        - Each function must accept a pandas Series and return a cleaned pandas Series
+        - Apply the transformation element-wise using .apply() or vectorized pandas operations
+        - Handle None, NaN, and empty string gracefully — return the value unchanged if it cannot be cleaned
+        - CRITICAL: Do NOT include any import statements. The following are already available: pd, re, unicodedata
+        - Use pd, re, unicodedata directly without importing them
+        
+        EXAMPLE OF A WELL-WRITTEN FUNCTION:
+        def normalize_phone(series):
+            def clean(val):
+                if pd.isna(val) or str(val).strip() == '':
+                    return val
+                digits = re.sub(r'\\D', '', str(val))
+                return digits[:16]
+            return series.apply(clean)
+
+        EXISTING TOOLKIT (do not duplicate):
+        {json.dumps(toolkit_keys, indent=2)}
+
+        COLUMNS NEEDING FUNCTIONS:
+        {json.dumps(needs_function_generation, indent=2)}
+
+        For each column, the instruction tells you what the output should look like.
+        The sample_values show you what the raw input looks like.
+        Write the function to transform from that input format to the desired output.
+
+        Return ONLY valid JSON with no explanation, no markdown, no code fences:
+        [
+            {{
+                "function_name": "descriptive_snake_case_name",
+                "column": "source_column_name",
+                "code": "def descriptive_snake_case_name(series): ..."
+            }}
+        ]
+    """
+
+    fallback = []
+
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        text = resp.content[0].text
+        text = text[text.find('['):text.rfind(']')+1]
+
+        result = json.loads(text)
+        logger.info(f"Generated {len(result)} cleaning function(s)")
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"generate_function returned invalid JSON: {e}")
+        return fallback
+
+    except Exception as e:
+        logger.error(f"generate_function failed: {e}")
+        return fallback
+
+
+def apply_generated_functions(generated_functions: list, df: pd.DataFrame) -> dict:
+    import re
+    import unicodedata
+
+    # whitelist — only these are available to generated code
+    # modules are pre-imported so Claude's code can use them without import statements
+    safe_globals = {
+        "__builtins__": {
+            "len": len, "str": str, "int": int, "float": float,
+            "round": round, "range": range, "enumerate": enumerate,
+            "isinstance": isinstance, "None": None, "True": True, "False": False,
+            "list": list, "dict": dict, "set": set, "tuple": tuple,
+            "map": map, "filter": filter, "zip": zip, "any": any, "all": all,
+            "print": print
+        },
+        "pd": pd,
+        "re": re,
+        "unicodedata": unicodedata,
+    }
+
+    loaded = {}
+
+    for item in generated_functions:
+        function_name = item["function_name"]
+        code          = item["code"]
+        column        = item["column"]
+
+        try:
+            namespace = dict(safe_globals)
+
+            # exec generated code into sandboxed namespace
+            exec(code, namespace)
+
+            func = namespace.get(function_name)
+            if func is None:
+                logger.warning(f"Function {function_name} not found after exec")
+                continue
+
+            # test on a small sample before storing — catches runtime errors early
+            if column in df.columns:
+                func(df[column].head(3))
+
+            loaded[function_name] = func
+            logger.info(f"Loaded generated function: {function_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to load generated function {function_name}: {e}")
+            continue
+
+    return loaded
+
 def run_correction(user_message: str, agent_result: dict) -> dict:
     client = _get_anthropic_client()
 
@@ -252,10 +350,10 @@ def run_correction(user_message: str, agent_result: dict) -> dict:
         text = text[text.find('{'):text.rfind('}')+1]
 
         result = json.loads(text)
-
+        logger.info(result)
         # append new business context on top of existing — never overwrite
         result["business_context"] = business_context + result.get("business_context", [])
-
+            
         # build confirmation echo — append unresolved items if any
         if result.get("unresolved"):
             result["confirmation"] += " Could not apply: " + ", ".join(result["unresolved"])
@@ -318,7 +416,7 @@ def run_agent(df: pd.DataFrame)-> str:
         # while True:
             response = client.messages.create(
                 model = 'claude-sonnet-4-5',
-                max_tokens = 4096,
+                max_tokens = 2048,
                 tools = agent_tools,
                 messages=messages
             )
@@ -366,198 +464,3 @@ def _get_anthropic_client() -> Anthropic:
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in .env")
     return Anthropic(api_key=api_key)
-
-    
-def detect_schema(df: pd.DataFrame) -> str:
-    columns = df.columns.tolist()
-    sample_rows = df.head(5).to_dict(orient='records')
-    sap_types = list(SAP_SCHEMAS.keys())
-    prompt = f"""
-    You are an SAP S/4HANA data migration assistant.
-
-    You are being given two things:
-    1. A list of column names from a legacy ERP CSV export
-    2. 3 sample rows of actual data from that CSV
-
-    Using BOTH the column names AND the sample row values together, determine
-    which SAP master data schema this CSV most likely belongs to.
-
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    COLUMN NAMES
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    {json.dumps(columns, indent=2)}
-
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    SAMPLE ROWS (3 rows)
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    {json.dumps(sample_rows, indent=2, default=str)}
-
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    VALID SAP SCHEMA TYPES
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    {json.dumps(sap_types, indent=2)}
-
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    INSTRUCTIONS
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Use these guidelines to determine the schema type:
-    - customer:  data about companies or people who buy from you
-                (look for: customer IDs, revenue, order history, billing address)
-    - vendor:    data about suppliers you purchase from
-                (look for: vendor IDs, payment terms, invoice info, purchasing data)
-    - material:  data about physical products or inventory items
-                (look for: product codes, descriptions, units of measure, weights)
-    - employee:  data about staff or personnel
-                (look for: employee IDs, hire dates, departments, job titles, salaries)
-
-    CRITICAL: Return a single word only — exactly one of the valid schema types listed above.
-    No explanation. No punctuation. No extra text. Just the single word.
-
-    Example of correct response: customer
-    Example of incorrect response: This looks like customer data because...
-    """
-    _client = _get_anthropic_client()
-    try:
-        resp = _client.messages.create(
-            model="claude-opus-4-6", max_tokens=10, messages=[{"role": "user", "content": prompt}]
-        )
-        detected = resp.content[0].text.strip().lower()
-        #customer becomes the default if we can't detect it
-        if detected not in SAP_SCHEMAS:
-            logger.info(f"Claude returned unknown type '{detected}'. Defaulting to customer schema")
-            return "customer"
-        return detected
-    except Exception as e:
-        logger.error(f"schema detectionn failed: {e}. Defaulting to customer chema")
-        return "customer"
-
-
-def build_mapping_prompt(df: pd.DataFrame, schema: dict, schema_label: str, required_fields: set) -> str:
-    columns = df.columns.tolist()
-    sample_rows = df.head(5).to_dict(orient='records')
-    toolkit_keys = list(get_cleaning_toolkit().keys())
-    required_values = ", ".join(required_fields)
-    prompt = f"""
-        You are an SAP S/4HANA data migration assistant.
-
-        You will be given:
-        - A list of column names from a legacy ERP CSV export
-        - 5 sample rows of actual data from that CSV
-        - The target SAP S/4HANA Customer schema (field name → description)
-        - A list of available Python cleaning functions
-
-        Your job is to analyze the columns and sample data, then return a JSON object
-        mapping each source column to the correct SAP field and cleaning function.
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        SOURCE COLUMNS
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        {json.dumps(columns, indent=2)}
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        SAMPLE DATA (5 rows)
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        {json.dumps(sample_rows, indent=2, default=str)}
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        TARGET SAP: {schema_label}
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        {json.dumps(schema, indent=2)}
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        AVAILABLE CLEANING FUNCTIONS
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        {json.dumps(toolkit_keys, indent=2)}
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        INSTRUCTIONS
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        1. Map each source column to the most appropriate SAP field based on
-        the column name AND the actual sample values you can see.
-
-        2. Select the most appropriate cleaning function for each column
-        based on what the data actually looks like in the sample rows.
-
-        3. Assign a confidence score (0.0 to 1.0) reflecting how certain
-        you are about the mapping. Use these guidelines:
-            1.0  — exact or near-exact match (e.g. "email" → SMTP_ADDR)
-            0.9  — strong contextual match (e.g. "anual_revnue" → UMSAV)
-            0.75 — reasonable inference (e.g. "ref_code" → KUNNR)
-            0.5  — ambiguous, needs human review
-        Flag anything below 0.80 — a human consultant will review those.
-
-        4. List any columns you cannot confidently map to any SAP field
-        in unmapped_columns.
-
-        5. Assess overall migration readiness:
-            READY       — all required fields mapped with confidence >= 0.80
-            NEEDS_REVIEW — one or more mappings below 0.80 confidence
-            BLOCKED     — a required field {required_values} is missing entirely
-
-        6. Write a concise audit_report_text covering these points in order:
-        - One sentence: how many of the 5 SAMPLE records are migration-ready — explicitly state "based on 5 sample rows" so it is clear this is not the full dataset
-        - Bullet list of what was successfully auto-cleaned (e.g. phones normalized, country codes standardized)
-        - Bullet list of what needs consultant attention (low confidence mappings, missing fields, format issues)
-        Keep each bullet to one line. No long paragraphs. 
-
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        RESPONSE FORMAT
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        Return ONLY valid JSON. No explanation, no markdown, no code fences.
-        Use exactly this structure:
-
-        {{
-        "field_mappings": [
-            {{
-            "source":      "original_column_name",
-            "target":      "SAP_FIELD_NAME",
-            "cleaning_fn": "function_name",
-            "confidence":  0.95
-            }}
-        ],
-        "unmapped_columns":  ["col1", "col2"],
-        "readiness": {{
-            "status":  "NEEDS_REVIEW",
-            "reasons": ["anual_revnue mapping below 0.80 confidence"]
-        }},
-        "audit_report_text": "9 of 10 records are migration-ready..."
-        }}
-        """
-    return prompt.strip()
-
-
-def run_migration_readiness_analysis(df: pd.DataFrame, schema: dict, schema_label: str, required: set) -> Dict[str, Any]:
-
-
-    _client = _get_anthropic_client()
-    _prompt = build_mapping_prompt(df, schema, schema_label, required)
-    fallback = {
-        "field_mappings":    [],
-        "unmapped_columns":  df.columns.tolist(),
-        "readiness": {
-            "status":  "BLOCKED",
-            "reasons": ["Claude API unavailable — manual review required"]
-        },
-        "audit_report_text": "Claude API unavailable. All columns flagged for manual review."
-    }
-
-    try:
-        resp = _client.messages.create(
-            model="claude-opus-4-6", max_tokens=2048, messages=[{"role": "user", "content": _prompt}]
-        )
-        #transform the response into text
-        resp_text = resp.content[0].text
-        result_text = resp_text.replace("```json", "").replace("```", "").strip()
-        start = result_text.find('{')
-        end   = result_text.rfind('}') + 1
-        result_text = result_text[start:end]
-        return json.loads(result_text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Claude returned invalid JSON: {e}")
-        return fallback
-
-    except Exception as e:
-        logger.error(f"Error calling Claude API: {e}")
-        return fallback
-
-
