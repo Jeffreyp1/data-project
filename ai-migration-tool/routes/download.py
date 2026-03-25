@@ -7,7 +7,9 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request, send_file
 
 import pandas as pd
+import logging
 
+logger = logging.getLogger(__name__)
 download_bp = Blueprint("download", __name__)
 
 @download_bp.route("/download", methods=["GET"])

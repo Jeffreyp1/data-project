@@ -11,7 +11,7 @@ from routes.download import download_bp
 
 from dotenv import load_dotenv
 
-from flask_caching import Cache
+from extensions import cache
 
 import logging
 logging.basicConfig(
@@ -21,12 +21,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 load_dotenv()
 
 def create_app() -> Flask:
     app = Flask(__name__)
 
+    ## caching
+    app.config["CACHE_TYPE"] = 'SimpleCache'
+    app.config["CACHE_DEFAULT_TIMEOUT"] = 1800
+    cache.init_app(app)
+
+    ## end of caching
     CORS(
         app,
         resources={r"/*": {"origins": "http://localhost:3000"}},
