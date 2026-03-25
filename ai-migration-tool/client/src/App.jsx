@@ -124,6 +124,7 @@ const [cleanColumns, setCleanColumns] = useState([])
                   setPreviewRows(data.cleaned_rows || [])
                   setCleanColumns(data.clean_columns || [])
                   setAuditReport(prev => ({ ...prev, field_mappings: data.field_mappings }))
+                  setExcelPath(data.excel_output_path)
                 }}
               />
             </section>
